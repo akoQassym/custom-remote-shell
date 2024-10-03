@@ -1,3 +1,9 @@
+// CSUH-3010 Operating Systems
+// Section 1
+// Prof. Eliseo Ferrante, Prof. Dena Ahmed
+// Aknur Kassym (ak8827) & Tarlan Askaruly (ta2153)
+// October 3, 2024
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
