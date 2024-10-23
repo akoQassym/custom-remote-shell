@@ -4,30 +4,39 @@
 #include <stdlib.h>
 #include "parser.h"
 
+// Skip leading whitespace characters in a string
 void skip_leading_whitespace(char **str) {
     while (isspace((unsigned char)**str)) (*str)++;
 }
 
+// Parse redirection symbols (< or >) and return the associated filename
 char *parse_redirection_filename(char **str) {
     skip_leading_whitespace(str);
     char *start = *str;
+    // Find the end of the filename (next whitespace or end of string)
     while (**str != '\0' && !isspace((unsigned char)**str)) (*str)++;
+    // Create a new string containing just the filename
     return strndup(start, *str - start);
 }
 
+// Parse a single argument, handling quoted strings
 void parse_single_argument(char **str, char *buffer) {
     int in_quotes = 0, buffer_index = 0;
     char quote_char = '\0';
 
     while (**str != '\0' && (in_quotes || !isspace((unsigned char)**str))) {
         if (in_quotes) {
+            // End of quoted string
             if (**str == quote_char) in_quotes = 0;
+            // Add character to buffer
             else buffer[buffer_index++] = **str;
         } else {
             if (**str == '\'' || **str == '\"') {
+                // Start of quoted string
                 in_quotes = 1;
                 quote_char = **str;
             } else {
+                // Add character to buffer
                 buffer[buffer_index++] = **str;
             }
         }
@@ -163,10 +172,6 @@ int split_piped_commands(char *command_line, char *piped_commands[], int max_pip
         piped_commands[pipe_count++] = cmd;
         token = strtok(NULL, "|");
     }
-
-    // After tokenizing, check for consecutive pipes by ensuring
-    // that no token is empty or only whitespace
-    // (Handled within the loop above)
 
     // Null-terminate the piped_commands array
     piped_commands[pipe_count] = NULL;
