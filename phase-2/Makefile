@@ -1,27 +1,22 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -pedantic -g
-SERVER_OBJS = server.o commands.o utils.o
-CLIENT_OBJS = client.o utils.o
+CFLAGS = -Wall -g
 
-all: server client
+all: shell
 
-server: $(SERVER_OBJS)
-	$(CC) $(CFLAGS) -o server $(SERVER_OBJS)
+shell: main.o parser.o commands.o utilities.o
+	$(CC) $(CFLAGS) -o shell main.o parser.o commands.o utilities.o
 
-client: $(CLIENT_OBJS)
-	$(CC) $(CFLAGS) -o client $(CLIENT_OBJS)
+main.o: main.c shell.h parser.h commands.h utilities.h
+	$(CC) $(CFLAGS) -c main.c
 
-server.o: server.c commands.h utils.h
-	$(CC) $(CFLAGS) -c server.c
+parser.o: parser.c parser.h shell.h
+	$(CC) $(CFLAGS) -c parser.c
 
-client.o: client.c utils.h
-	$(CC) $(CFLAGS) -c client.c
-
-commands.o: commands.c commands.h
+commands.o: commands.c commands.h shell.h
 	$(CC) $(CFLAGS) -c commands.c
 
-utils.o: utils.c utils.h
-	$(CC) $(CFLAGS) -c utils.c
+utilities.o: utilities.c utilities.h shell.h
+	$(CC) $(CFLAGS) -c utilities.c
 
 clean:
-	rm -f *.o server client
+	rm -f *.o shell
