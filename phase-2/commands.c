@@ -50,10 +50,19 @@ void execute_single_command(ShellCommand *cmd) {
             close(error_fd);
         }
 
-        // Execute the command
-        if (execvp(cmd->arguments[0], cmd->arguments) < 0) {
-            fprintf(stderr, "Error: Invalid command '%s'\n", cmd->arguments[0]);
-            exit(EXIT_FAILURE);
+        // Check if the command starts with './' or '/' indicating a relative or absolute path
+        if (cmd->arguments[0][0] == '.' || cmd->arguments[0][0] == '/') {
+            // Execute command as-is, since it may be a path
+            if (execv(cmd->arguments[0], cmd->arguments) < 0) {
+                perror("Error executing program");
+                exit(EXIT_FAILURE);
+            }
+        } else {
+            // Use execvp for searching in PATH
+            if (execvp(cmd->arguments[0], cmd->arguments) < 0) {
+                fprintf(stderr, "Error: Invalid command '%s'\n", cmd->arguments[0]);
+                exit(EXIT_FAILURE);
+            }
         }
     } else if (child_pid > 0) {
         // Parent process
