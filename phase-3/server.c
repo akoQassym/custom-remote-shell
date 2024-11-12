@@ -3,16 +3,38 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 #include "commands.h"
 #include "parser.h"
 #include "shell.h"
-#include "utilities.h"  // Updated to use the merged utilities.h
+#include "utilities.h"
 
 #define PORT 8080          // Port number to listen on
 #define BUFFER_SIZE 1024   // Buffer size for receiving data
 
-// Handle a single client's commands
-void handle_client(int client_socket) {
+// Global client counter to assign unique IDs
+int client_counter = 0;
+pthread_mutex_t counter_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex for thread-safe ID generation
+
+// Structure to hold client info
+typedef struct {
+    int socket;
+    int client_id;
+    struct sockaddr_in client_addr;
+} ClientInfo;
+
+// Function to handle each client in a separate thread
+void *handle_client_thread(void *arg) {
+    ClientInfo *client_info = (ClientInfo *)arg;
+    int client_socket = client_info->socket;
+    int client_id = client_info->client_id;
+
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(client_info->client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
+    int client_port = ntohs(client_info->client_addr.sin_port);
+
+    printf("Client connected: ID = %d, IP = %s, Port = %d\n", client_id, client_ip, client_port);
+
     char buffer[BUFFER_SIZE];
 
     while (1) {
@@ -25,21 +47,20 @@ void handle_client(int client_socket) {
             break;
         } else if (bytes_received == 0) {
             // Client has closed the connection
-            printf("Client disconnected.\n");
+            printf("Client ID %d (IP = %s, Port = %d) disconnected.\n", client_id, client_ip, client_port);
             break;
         }
 
         buffer[bytes_received] = '\0';  // Null-terminate the received data
-
-        printf("Received command: \"%s\"\n", buffer);  // Log the received command
+        printf("Received command from Client ID %d: \"%s\"\n", client_id, buffer);
 
         // If the client sends 'exit', terminate the connection
         if (strcmp(buffer, "exit") == 0) {
-            printf("Client requested to close the connection.\n");
+            printf("Client ID %d requested to close the connection.\n", client_id);
             break;
         }
 
-        // Duplicate the client socket to STDOUT and STDERR so that command outputs are sent to the client
+        // Duplicate the client socket to STDOUT and STDERR for command output
         int stdout_dup = dup(STDOUT_FILENO);
         int stderr_dup = dup(STDERR_FILENO);
         if (dup2(client_socket, STDOUT_FILENO) < 0) {
@@ -99,7 +120,7 @@ void handle_client(int client_socket) {
                     dup2(stderr_dup, STDERR_FILENO);
                     close(stdout_dup);
                     close(stderr_dup);
-                    return;
+                    return NULL;
                 }
                 parse_shell_command(piped_commands[i], commands[i]);
             }
@@ -117,17 +138,20 @@ void handle_client(int client_socket) {
 
         // Send end-of-output signal to the client
         send(client_socket, "__END__", strlen("__END__"), 0);
-
         // Restore the original STDOUT and STDERR
         dup2(stdout_dup, STDOUT_FILENO);
         dup2(stderr_dup, STDERR_FILENO);
         close(stdout_dup);
         close(stderr_dup);
     }
+
+    close(client_socket); // Close the client socket
+    free(client_info);    // Free the client info structure
+    return NULL;          // Exit the thread
 }
 
 int main(void) {
-    int server_socket, client_socket;
+    int server_socket;
     struct sockaddr_in server_addr, client_addr;
     socklen_t addr_len = sizeof(client_addr);
 
@@ -149,23 +173,42 @@ int main(void) {
     // Continuously accept and handle client connections
     while (1) {
         // Accept a new client connection
-        client_socket = accept(server_socket, (struct sockaddr*)&client_addr, &addr_len);
+        int client_socket = accept(server_socket, (struct sockaddr*)&client_addr, &addr_len);
         if (client_socket < 0) {
             perror("Accept failed");
             continue;
         }
 
-        printf("Client connected.\n");
+        // Increment and assign a unique client ID
+        pthread_mutex_lock(&counter_mutex);
+        int client_id = ++client_counter;
+        pthread_mutex_unlock(&counter_mutex);
 
-        // Handle the client's commands
-        handle_client(client_socket);
+        printf("Accepted new connection: Client ID %d\n", client_id);
 
-        // Close the client socket after handling
-        close(client_socket);
-        printf("Client disconnected.\n");
+        // Allocate and set up client info
+        ClientInfo *client_info = malloc(sizeof(ClientInfo));
+        if (client_info == NULL) {
+            perror("Malloc failed");
+            close(client_socket);
+            continue;
+        }
+
+        client_info->socket = client_socket;
+        client_info->client_id = client_id;
+        client_info->client_addr = client_addr;
+
+        // Create a thread to handle the new client
+        pthread_t thread_id;
+        if (pthread_create(&thread_id, NULL, handle_client_thread, client_info) != 0) {
+            perror("Thread creation failed");
+            close(client_socket);
+            free(client_info);
+        } else {
+            pthread_detach(thread_id); // Detach thread
+        }
     }
 
-    // Close the server socket (unreachable code in this example)
     close(server_socket);
     return 0;
 }
