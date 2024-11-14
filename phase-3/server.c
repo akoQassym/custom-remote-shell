@@ -60,18 +60,6 @@ void *handle_client_thread(void *arg) {
             break;
         }
 
-        // Duplicate the client socket to STDOUT and STDERR for command output
-        int stdout_dup = dup(STDOUT_FILENO);
-        int stderr_dup = dup(STDERR_FILENO);
-        if (dup2(client_socket, STDOUT_FILENO) < 0) {
-            perror("dup2 STDOUT failed");
-            break;
-        }
-        if (dup2(client_socket, STDERR_FILENO) < 0) {
-            perror("dup2 STDERR failed");
-            break;
-        }
-
         // Parse and execute the received command
         char *piped_commands[MAX_PIPED_COMMANDS + 1];
         int piped_command_count = split_piped_commands(buffer, piped_commands, MAX_PIPED_COMMANDS + 1);
@@ -80,71 +68,103 @@ void *handle_client_thread(void *arg) {
         if (piped_command_count == -1) {
             // Send end-of-output signal
             send(client_socket, "__END__", strlen("__END__"), 0);
-            // Restore original STDOUT and STDERR
-            dup2(stdout_dup, STDOUT_FILENO);
-            dup2(stderr_dup, STDERR_FILENO);
-            close(stdout_dup);
-            close(stderr_dup);
             continue;
         }
 
+        // Create a pipe for capturing command output
+        int pipe_fds[2];
+        if (pipe(pipe_fds) == -1) {
+            perror("pipe");
+            break;
+        }
+
         if (piped_command_count == 1) {
+            // Handle a single command
             ShellCommand cmd;
             parse_shell_command(piped_commands[0], &cmd);
 
             if (cmd.arguments[0] == NULL) {
                 // No command to execute
                 send(client_socket, "__END__", strlen("__END__"), 0);
-                // Restore original STDOUT and STDERR
-                dup2(stdout_dup, STDOUT_FILENO);
-                dup2(stderr_dup, STDERR_FILENO);
-                close(stdout_dup);
-                close(stderr_dup);
                 continue;
             }
 
-            if (!is_built_in_command(&cmd)) {
-                execute_single_command(&cmd);
+            pid_t pid = fork();
+            if (pid == 0) {
+                // Child process
+
+                // Close the read end of the pipe
+                close(pipe_fds[0]);
+
+                // Redirect stdout and stderr to the write end of the pipe
+                dup2(pipe_fds[1], STDOUT_FILENO);
+                dup2(pipe_fds[1], STDERR_FILENO);
+                close(pipe_fds[1]);
+
+                // Execute the command
+                if (!is_built_in_command(&cmd)) {
+                    execute_single_command(&cmd);
+                }
+                exit(EXIT_SUCCESS);
+            } else if (pid > 0) {
+                // Parent process
+
+                // Close the write end of the pipe
+                close(pipe_fds[1]);
+
+                // Read output from the child process and send to client
+                char output_buffer[BUFFER_SIZE];
+                ssize_t read_bytes;
+                while ((read_bytes = read(pipe_fds[0], output_buffer, sizeof(output_buffer) - 1)) > 0) {
+                    output_buffer[read_bytes] = '\0'; // Null-terminate
+                    send(client_socket, output_buffer, read_bytes, 0); // Send output to client
+                }
+
+                // Close the read end of the pipe
+                close(pipe_fds[0]);
+
+                // Wait for the child process to finish
+                waitpid(pid, NULL, 0);
+
+                // Send end-of-output signal to the client
+                send(client_socket, "__END__", strlen("__END__"), 0);
+            } else {
+                perror("fork");
+                close(pipe_fds[0]);
+                close(pipe_fds[1]);
             }
         } else {
-            // Handle piped commands
+            // Handle multiple piped commands
             ShellCommand *commands[MAX_PIPED_COMMANDS + 1];
             for (int i = 0; i < piped_command_count; i++) {
                 commands[i] = malloc(sizeof(ShellCommand));
                 if (commands[i] == NULL) {
                     perror("Malloc failed");
-                    // Send end-of-output signal
                     send(client_socket, "__END__", strlen("__END__"), 0);
-                    // Restore original STDOUT and STDERR
-                    dup2(stdout_dup, STDOUT_FILENO);
-                    dup2(stderr_dup, STDERR_FILENO);
-                    close(stdout_dup);
-                    close(stderr_dup);
+                    close(pipe_fds[0]);
+                    close(pipe_fds[1]);
                     return NULL;
                 }
                 parse_shell_command(piped_commands[i], commands[i]);
             }
+
+            // Execute piped commands
             execute_piped_commands(commands, piped_command_count);
 
             // Free allocated ShellCommand structures
             for (int i = 0; i < piped_command_count; i++) {
-                // Free each argument string
                 for (int j = 0; commands[i]->arguments[j] != NULL; j++) {
                     free(commands[i]->arguments[j]);
                 }
                 free(commands[i]);
             }
-        }
 
-        // Send end-of-output signal to the client
-        send(client_socket, "__END__", strlen("__END__"), 0);
-        // Restore the original STDOUT and STDERR
-        dup2(stdout_dup, STDOUT_FILENO);
-        dup2(stderr_dup, STDERR_FILENO);
-        close(stdout_dup);
-        close(stderr_dup);
+            // Send end-of-output signal to the client
+            send(client_socket, "__END__", strlen("__END__"), 0);
+        }
     }
 
+    // Clean up: close the client socket and free client info structure
     close(client_socket); // Close the client socket
     free(client_info);    // Free the client info structure
     return NULL;          // Exit the thread
