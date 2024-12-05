@@ -111,8 +111,6 @@ void *handle_client_thread(void *arg) {
             ShellCommand cmd;
             parse_shell_command(piped_commands[0], &cmd);
 
-            printf("(%d)--- created (%d)\n", client_id, cmd.arguments[1] ? atoi(cmd.arguments[1]) : -1);
-
             if (cmd.arguments[0] == NULL) {
                 // No command to execute
                 send(client_socket, "__END__", strlen("__END__"), 0);
@@ -121,6 +119,9 @@ void *handle_client_thread(void *arg) {
 
             if (cmd.arguments[0][0] == '.' && cmd.arguments[0][1] == '/') {
                 // Program execution
+                printf("(%d)--- created (%d)\n", client_id, atoi(cmd.arguments[1]));
+
+                // Allocate memory for a task
                 Task *task = malloc(sizeof(Task));
                 if (!task) {
                     perror("Malloc failed for Task");
@@ -142,6 +143,8 @@ void *handle_client_thread(void *arg) {
                 add_task(task); // Add the task to the scheduler
             } else {
                 // Shell command: execute directly
+                printf("(%d)--- created (%d)\n", client_id, -1);
+
                 int pipe_fds[2];
                 if (pipe(pipe_fds) == -1) {
                     perror("Pipe creation failed");
