@@ -1,6 +1,9 @@
 {
     "files.associations": {
         "utils.h": "c",
-        "inet.h": "c"
+        "inet.h": "c",
+        "utilities.h": "c",
+        "shell.h": "c",
+        "semaphore.h": "c"
     }
 }

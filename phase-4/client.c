@@ -22,7 +22,7 @@ int main() {
     printf("Connected to server. Enter commands (type 'exit' to quit):\n");
 
     while (1) {
-        printf("client_shell> ");  // Display prompt
+        printf(">>> ");  // Display prompt
         fflush(stdout); // Ensure prompt is displayed immediately
 
         // Read user input from stdin
